@@ -44,6 +44,7 @@
                         hlint
                         hspec
                         ihp-hspec
+                        fourmolu
                     ];
 
                     # Hoogle documentation server (enabled by default on port 8002)

@@ -1,14 +1,15 @@
 module Web.View.Layout (defaultLayout, Html) where
 
-import IHP.ViewPrelude
-import IHP.Environment
-import Generated.Types
-import Web.Types
-import Web.Routes
 import Application.Helper.View
+import Generated.Types
+import IHP.Environment
+import IHP.ViewPrelude
+import Web.Routes
+import Web.Types
 
 defaultLayout :: Html -> Html
-defaultLayout inner = [hsx|
+defaultLayout inner =
+    [hsx|
 <!DOCTYPE html>
 <html lang="en">
     <head>
@@ -33,14 +34,16 @@ defaultLayout inner = [hsx|
 -- See https://ihp.digitallyinduced.com/Guide/assets.html for more details
 
 stylesheets :: Html
-stylesheets = [hsx|
+stylesheets =
+    [hsx|
         <link rel="stylesheet" href={assetPath "/vendor/bootstrap-5.3.8/bootstrap.min.css"}/>
         <link rel="stylesheet" href={assetPath "/vendor/flatpickr.min.css"}/>
         <link rel="stylesheet" href={assetPath "/app.css"}/>
     |]
 
 scripts :: Html
-scripts = [hsx|
+scripts =
+    [hsx|
         {when isDevelopment devScripts}
         <script src={assetPath "/vendor/jquery-4.0.0.slim.min.js"}></script>
         <script src={assetPath "/vendor/timeago.js"}></script>
@@ -57,12 +60,14 @@ scripts = [hsx|
     |]
 
 devScripts :: Html
-devScripts = [hsx|
+devScripts =
+    [hsx|
         <script id="livereload-script" src={assetPath "/livereload.js"} data-ws={liveReloadWebsocketUrl}></script>
     |]
 
 metaTags :: Html
-metaTags = [hsx|
+metaTags =
+    [hsx|
     <meta charset="utf-8"/>
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"/>
     <meta property="og:title" content="App"/>

@@ -15,3 +15,10 @@ JS_FILES += ${IHP}/static/vendor/turbolinksMorphdom.js
 
 include ${IHP}/Makefile.dist
 
+.PHONY: format format-check
+format:
+	fourmolu --mode inplace $(shell find Application Web Config -name '*.hs')
+
+format-check:
+	fourmolu --mode check $(shell find Application Web Config -name '*.hs')
+

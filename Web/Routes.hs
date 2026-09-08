@@ -1,6 +1,7 @@
 module Web.Routes where
-import IHP.RouterPrelude
+
 import Generated.Types
+import IHP.RouterPrelude
 import Web.Types
 
 -- The welcome page at '/' is served by the static controller below.
