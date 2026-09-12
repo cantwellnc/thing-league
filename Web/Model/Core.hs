@@ -2,6 +2,9 @@
 module Web.Model.Core where
 
 import IHP.Prelude
+import qualified Data.Map as Map
+import Data.Map (Map)
+import Data.Ord (Down (..))
 
 -- TODO (claude): once this connects to IHP persistence, consider replacing these with
 -- IHP.ModelSupport's Id' pattern (newtype Id' table = Id (PrimaryKey table);
@@ -9,17 +12,15 @@ import IHP.Prelude
 newtype LeagueId = LeagueId UUID deriving (Eq, Show)
 newtype UserId = UserId UUID deriving (Eq, Show)
 newtype RoundId = RoundId UUID deriving (Eq, Show)
-newtype SubmissionId = SubmissionId UUID deriving (Eq, Show)
+newtype SubmissionId = SubmissionId UUID deriving (Eq, Ord, Show)
 newtype VoteId = VoteId UUID deriving (Eq, Show)
 data MemberId = MemberId UUID UUID -- league + user
 
 type Ranking = [(Submission, Int)] -- (submission, # of points it got)
-data LeagueState
-    = LeagueOpen
-    | LeagueInProgress
-    | LeagueComplete
-    deriving (Eq, Show)
 
+-- League config (voteBudget, maxVotesPerSubmission) is fixed once and lives on
+-- League itself now -- a Round just looks it up via roundLeague, no need to
+-- duplicate it here.
 data Round
     = OpenedRound
         { roundId :: RoundId
@@ -32,8 +33,6 @@ data Round
         , roundLeague :: LeagueId
         , roundTheme :: Text
         , voteSubmitDeadline :: UTCTime
-        , voteBudget :: Int
-        , maxVotesPerSubmission :: Int
         }
     | CompletedRound
         { roundId :: RoundId
@@ -42,19 +41,11 @@ data Round
         , ranking :: Ranking
         }
     deriving Show
-    
-
-data RoundCommand
-    = StartRound
-    | OpenVoting
-    | CompleteRound
 
 data RoundEvent
     = RoundStarted
     | VotingOpened
         { voteSubmitDeadline :: UTCTime
-        , voteBudget :: Int
-        , maxVotesPerSubmission :: Int
         }
     | RoundCompleted Ranking
     deriving Show
@@ -75,16 +66,14 @@ startRound roundId leagueId theme submitDeadline
     }
 
 processRoundEvent :: RoundEvent -> Round -> Either Text Round
-processRoundEvent (VotingOpened voteDeadline voteBudget maxVotes) (OpenedRound id league theme submitDeadline) =
+processRoundEvent (VotingOpened voteDeadline) (OpenedRound id league theme submitDeadline) =
     Right $ VotingRound
         { roundId = id
         , roundLeague = league
         , roundTheme = theme
-        , voteSubmitDeadline = submitDeadline
-        , voteBudget = voteBudget
-        , maxVotesPerSubmission = maxVotes
+        , voteSubmitDeadline = voteDeadline
         }
-processRoundEvent (RoundCompleted ranking) (VotingRound id league theme submitDeadline _ _) =
+processRoundEvent (RoundCompleted ranking) (VotingRound id league theme submitDeadline) =
     Right $ CompletedRound
         { roundId = id
         , roundLeague = league
@@ -92,6 +81,35 @@ processRoundEvent (RoundCompleted ranking) (VotingRound id league theme submitDe
         , ranking = ranking
         }
 processRoundEvent event round = Left $ "Illegal transition " <> (tshow event) <> " in round " <> (tshow round)
+
+
+data RoundCommand
+    = OpenVoting
+        { voteSubmitDeadline :: UTCTime
+        }
+    | CompleteRound [Submission] [Vote]
+    deriving Show
+
+-- for a round, if command is legal, produce the roundEvent that records the decision
+processRoundCommand :: RoundCommand -> Round -> Either Text RoundEvent
+processRoundCommand (OpenVoting deadline) (OpenedRound {}) =
+    Right (VotingOpened deadline)
+processRoundCommand (CompleteRound submissions votes) (VotingRound { roundId = thisRoundId }) =
+    Right (RoundCompleted ranking)
+  where
+    roundSubmissions = filter (\(Submission { roundId = rid }) -> rid == thisRoundId) submissions
+    roundVotes = filter (\(Vote { roundId = rid }) -> rid == thisRoundId) votes
+    -- points a submission received, summed across every vote for it
+    pointsBySubmission :: Map SubmissionId Int
+    pointsBySubmission = Map.fromListWith (+) [(sid, pts) | Vote { submissionId = sid, points = pts } <- roundVotes]
+    -- submissions with zero votes still appear, ranked last, at 0 points
+    ranking =
+        roundSubmissions
+            |> map (\s@(Submission { id = sid }) -> (s, Map.findWithDefault 0 sid pointsBySubmission))
+            |> sortOn (Down . snd)
+processRoundCommand command round =
+    Left $ "Illegal command " <> tshow command <> " for round " <> tshow round
+
 
 -- WIP
 
@@ -101,13 +119,52 @@ data User = User
     , email :: Text
     , createdAt :: UTCTime
     }
+    deriving Show
 
-data League = League
-    { id :: LeagueId
-    , name :: Text
-    , createdBy :: UserId
-    , createdAt :: UTCTime
-    }
+-- final player standings, aggregated across all rounds -- (player, total points), sorted desc
+type Standings = [(User, Int)]
+
+data League
+    = OpenLeague
+        -- everything is fixed except membership; people join via inviteCode
+        { leagueId :: LeagueId
+        , leagueName :: Text
+        , createdBy :: UserId
+        , createdAt :: UTCTime
+        , inviteCode :: Text
+        , voteBudget :: Int
+        , maxVotesPerSubmission :: Int
+        }
+    | InProgressLeague
+        -- membership, rounds, and voting structure are all locked in now
+        { leagueId :: LeagueId
+        , leagueName :: Text
+        , createdBy :: UserId
+        , createdAt :: UTCTime
+        , voteBudget :: Int
+        , maxVotesPerSubmission :: Int
+        }
+    | CompleteLeague
+        { leagueId :: LeagueId
+        , leagueName :: Text
+        , createdBy :: UserId
+        , createdAt :: UTCTime
+        , standings :: Standings
+        }
+    deriving Show
+
+-- same reasoning as startRound: creation is not a transition on an existing value
+createLeague :: LeagueId -> Text -> UserId -> UTCTime -> Text -> Int -> Int -> League
+createLeague leagueId name owner createdAt inviteCode budget maxPerSubmission =
+    OpenLeague
+        { leagueId = leagueId
+        , leagueName = name
+        , createdBy = owner
+        , createdAt = createdAt
+        , inviteCode = inviteCode
+        , voteBudget = budget
+        , maxVotesPerSubmission = maxPerSubmission
+        }
 
 data LeagueMember = LeagueMember
     { leagueId :: LeagueId
@@ -132,6 +189,7 @@ data Vote = Vote
     , roundId :: RoundId
     , points :: Int
     }
+    deriving Show
 
 {-
 flow:
@@ -176,6 +234,3 @@ processLeagueEvent event league = undefined
 
 processLeagueCommand :: LeagueCommand -> League -> League
 processLeagueCommand command league = undefined
-
-processRoundCommand :: RoundCommand -> Round -> Round
-processRoundCommand command round = undefined
